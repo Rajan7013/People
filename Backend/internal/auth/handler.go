@@ -67,15 +67,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set refresh token as HttpOnly cookie
-	http.SetCookie(w, &http.Cookie{
+	cookie := &http.Cookie{
 		Name:     "refresh_token",
 		Value:    response.RefreshToken,
 		Path:     "/api/v1/auth/refresh",
 		HttpOnly: true,
-		Secure:   true, // TODO: Set to false in dev environment if needed, or use TLS locally
-		SameSite: http.SameSiteStrictMode,
-		Expires:  time.Now().Add(7 * 24 * time.Hour), // 7 days (matches refresh token TTL)
-	})
+		Secure:   true, // Always true for SameSite=None
+		SameSite: http.SameSiteNoneMode,
+		Expires:  time.Now().Add(7 * 24 * time.Hour),
+	}
+	http.SetCookie(w, cookie)
 
 	tenantIDStr := ""
 	if response.User.TenantID != nil {
@@ -153,7 +154,7 @@ func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		Path:     "/api/v1/auth/refresh",
 		HttpOnly: true,
 		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteNoneMode,
 		Expires:  time.Now().Add(7 * 24 * time.Hour),
 	})
 
@@ -260,8 +261,8 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   600, // 10 minutes
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
-		SameSite: http.SameSiteLaxMode,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
 	})
 
 	// Get the OAuth URL and redirect
@@ -344,8 +345,8 @@ func (h *Handler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		Value:    refreshToken,
 		Path:     "/api/v1/auth/refresh",
 		HttpOnly: true,
-		Secure:   true, // TODO: Set to false in dev, true in prod
-		SameSite: http.SameSiteStrictMode,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
 		Expires:  time.Now().Add(7 * 24 * time.Hour),
 	})
 
