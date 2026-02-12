@@ -1,0 +1,8 @@
+// Manual Route Addition for Super Admin Management
+// Add these lines to Backend/internal/server/server.go after line 284 (after the /usage route)
+
+// Super Admin Management
+r.Route("/admins", func(r chi.Router) {
+    r.Post("/", s.superAdminHandler.CreateSuperAdmin)
+    r.Get("/", s.superAdminHandler.GetAllSuperAdmins)
+})

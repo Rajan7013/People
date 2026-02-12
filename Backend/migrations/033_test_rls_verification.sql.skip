@@ -1,0 +1,170 @@
+-- RLS Policy Verification Tests
+-- Run these tests after applying migrations 030, 031, and 032
+
+-- ============================================================================
+-- TEST 1: Super Admin Isolation
+-- ============================================================================
+\echo '\n=== TEST 1: Super Admin Isolation ==='
+
+-- Set context as super admin
+SELECT set_session_context(
+    '00000000-0000-0000-0000-000000000001'::UUID,  -- user_id
+    NULL,                                            -- tenant_id (NULL for super admin)
+    'super_admin',                                   -- role
+    NULL,                                            -- department_id
+    NULL                                             -- team_id
+);
+
+-- Super admin should see all tenants
+\echo 'Super admin viewing all tenants:'
+SELECT COUNT(*) as tenant_count FROM tenants;
+
+-- Super admin should see all users
+\echo 'Super admin viewing all users:'
+SELECT COUNT(*) as user_count FROM users;
+
+-- ============================================================================
+-- TEST 2: Org Admin Tenant Isolation
+-- ============================================================================
+\echo '\n=== TEST 2: Org Admin Tenant Isolation ==='
+
+-- Assume we have a tenant with ID (replace with actual tenant ID)
+SELECT set_session_context(
+    '00000000-0000-0000-0000-000000000002'::UUID,  -- user_id
+    (SELECT id FROM tenants LIMIT 1),               -- tenant_id
+    'admin',                                         -- role
+    NULL,                                            -- department_id
+    NULL                                             -- team_id
+);
+
+-- Org admin should see only their tenant
+\echo 'Org admin viewing tenants (should see only 1):'
+SELECT COUNT(*) as tenant_count FROM tenants;
+
+-- Org admin should see all users in their tenant
+\echo 'Org admin viewing users in their tenant:'
+SELECT COUNT(*) as user_count FROM users;
+
+-- ============================================================================
+-- TEST 3: Manager Department Isolation
+-- ============================================================================
+\echo '\n=== TEST 3: Manager Department Isolation ==='
+
+-- Assume we have a manager with department (replace with actual IDs)
+SELECT set_session_context(
+    (SELECT user_id FROM employees WHERE department_id IS NOT NULL LIMIT 1),  -- user_id
+    (SELECT tenant_id FROM employees WHERE department_id IS NOT NULL LIMIT 1), -- tenant_id
+    'manager',                                                                  -- role
+    (SELECT department_id FROM employees WHERE department_id IS NOT NULL LIMIT 1), -- department_id
+    NULL                                                                        -- team_id
+);
+
+-- Manager should see only their department employees
+\echo 'Manager viewing users (should see only department):'
+SELECT COUNT(*) as user_count FROM users;
+
+\echo 'Manager viewing employees (should see only department):'
+SELECT COUNT(*) as employee_count FROM employees;
+
+-- ============================================================================
+-- TEST 4: HR Cannot See Other HR
+-- ============================================================================
+\echo '\n=== TEST 4: HR Cannot See Other HR ==='
+
+SELECT set_session_context(
+    (SELECT id FROM users WHERE role = 'hr' LIMIT 1),  -- user_id
+    (SELECT tenant_id FROM users WHERE role = 'hr' LIMIT 1), -- tenant_id
+    'hr',                                                -- role
+    NULL,                                                -- department_id
+    NULL                                                 -- team_id
+);
+
+-- HR should see employees but not other HR or managers
+\echo 'HR viewing users (should see only employees and team_leads):'
+SELECT role, COUNT(*) as count FROM users GROUP BY role;
+
+-- ============================================================================
+-- TEST 5: Team Lead Team Isolation
+-- ============================================================================
+\echo '\n=== TEST 5: Team Lead Team Isolation ==='
+
+-- Assume we have a team lead with team (replace with actual IDs)
+SELECT set_session_context(
+    (SELECT id FROM users WHERE team_id IS NOT NULL LIMIT 1),  -- user_id
+    (SELECT tenant_id FROM users WHERE team_id IS NOT NULL LIMIT 1), -- tenant_id
+    'team_lead',                                                 -- role
+    NULL,                                                        -- department_id
+    (SELECT team_id FROM users WHERE team_id IS NOT NULL LIMIT 1) -- team_id
+);
+
+-- Team lead should see only their team
+\echo 'Team lead viewing users (should see only team members):'
+SELECT COUNT(*) as user_count FROM users;
+
+-- ============================================================================
+-- TEST 6: Employee Self-Only Access
+-- ============================================================================
+\echo '\n=== TEST 6: Employee Self-Only Access ==='
+
+SELECT set_session_context(
+    (SELECT id FROM users WHERE role = 'employee' LIMIT 1),  -- user_id
+    (SELECT tenant_id FROM users WHERE role = 'employee' LIMIT 1), -- tenant_id
+    'employee',                                               -- role
+    NULL,                                                     -- department_id
+    NULL                                                      -- team_id
+);
+
+-- Employee should see only themselves
+\echo 'Employee viewing users (should see only 1 - themselves):'
+SELECT COUNT(*) as user_count FROM users;
+
+\echo 'Employee viewing employees (should see only 1 - themselves):'
+SELECT COUNT(*) as employee_count FROM employees;
+
+-- ============================================================================
+-- TEST 7: Cross-Tenant Isolation
+-- ============================================================================
+\echo '\n=== TEST 7: Cross-Tenant Isolation ==='
+
+-- Get two different tenants
+DO $$
+DECLARE
+    tenant_a UUID;
+    tenant_b UUID;
+    user_a UUID;
+    user_b UUID;
+BEGIN
+    -- Get first tenant and user
+    SELECT id INTO tenant_a FROM tenants LIMIT 1;
+    SELECT id INTO user_a FROM users WHERE tenant_id = tenant_a LIMIT 1;
+    
+    -- Get second tenant and user
+    SELECT id INTO tenant_b FROM tenants WHERE id != tenant_a LIMIT 1;
+    SELECT id INTO user_b FROM users WHERE tenant_id = tenant_b LIMIT 1;
+    
+    -- Set context as user from tenant A
+    PERFORM set_session_context(user_a, tenant_a, 'admin', NULL, NULL);
+    
+    RAISE NOTICE 'Tenant A admin viewing users: %', (SELECT COUNT(*) FROM users);
+    
+    -- Set context as user from tenant B
+    PERFORM set_session_context(user_b, tenant_b, 'admin', NULL, NULL);
+    
+    RAISE NOTICE 'Tenant B admin viewing users: %', (SELECT COUNT(*) FROM users);
+    
+    -- These counts should be different (tenant isolation working)
+END $$;
+
+-- ============================================================================
+-- SUMMARY
+-- ============================================================================
+\echo '\n=== VERIFICATION SUMMARY ==='
+\echo 'If all tests show expected results, RLS policies are working correctly.'
+\echo 'Expected behaviors:'
+\echo '  - Super admin sees all data'
+\echo '  - Org admin sees only their tenant data'
+\echo '  - Manager sees only their department'
+\echo '  - HR sees employees but not managers/HR'
+\echo '  - Team lead sees only their team'
+\echo '  - Employee sees only themselves'
+\echo '  - Tenants are completely isolated from each other'
