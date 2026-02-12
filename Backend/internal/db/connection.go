@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib" // PostgreSQL driver
@@ -27,6 +28,15 @@ func Connect(cfg *config.Config) (*sql.DB, error) {
 			cfg.DBName,
 			cfg.DBSSLMode,
 		)
+	}
+
+	// Add default_query_exec_mode=cache_describe if not present for pgx compatibility with poolers (like Supabase Transaction mode)
+	if !strings.Contains(dsn, "default_query_exec_mode") {
+		separator := "?"
+		if strings.Contains(dsn, "?") {
+			separator = "&"
+		}
+		dsn = fmt.Sprintf("%s%sdefault_query_exec_mode=cache_describe", dsn, separator)
 	}
 
 	log.Info().
